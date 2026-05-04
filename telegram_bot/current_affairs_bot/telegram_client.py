@@ -22,6 +22,7 @@ class TelegramClient:
         self.session = requests.Session()
         self.base_url = f"https://api.telegram.org/bot{self.settings.telegram_bot_token}"
         self.chat_id_aliases: dict[str, str] = {}
+        self._channel_description_synced = False
 
     def broadcast(self, article: Article, generated_post: GeneratedPost) -> list[PendingGroupReveal]:
         pending_reveals: list[PendingGroupReveal] = []
@@ -32,6 +33,7 @@ class TelegramClient:
         if self.settings.telegram_channel_id:
             chat_id = self.settings.telegram_channel_id
             try:
+                self._ensure_channel_description()
                 message = self._build_post_message(chat_id, article, generated_post)
                 self._send_message(chat_id, message)
                 if self.settings.telegram_send_mcq_polls:
@@ -119,6 +121,32 @@ class TelegramClient:
             )
 
         self._handle_response(response, "sendPoll")
+
+    def _ensure_channel_description(self) -> None:
+        if self._channel_description_synced:
+            return
+        if not self.settings.telegram_channel_id or not self.settings.telegram_channel_description:
+            self._channel_description_synced = True
+            return
+
+        try:
+            response = self._post_with_retry(
+                self.settings.telegram_channel_id,
+                "setChatDescription",
+                lambda resolved_chat_id: self.session.post(
+                    f"{self.base_url}/setChatDescription",
+                    data={
+                        "chat_id": resolved_chat_id,
+                        "description": self._fit_text(self.settings.telegram_channel_description, 255),
+                    },
+                    timeout=self.settings.request_timeout_seconds,
+                ),
+            )
+            self._handle_response(response, "setChatDescription")
+            self._channel_description_synced = True
+        except Exception as exc:
+            LOGGER.warning("Unable to update Telegram channel description automatically: %s", exc)
+            self._channel_description_synced = True
 
     def _post_poll(self, chat_id: str, mcq: MCQ, is_anonymous: bool) -> requests.Response:
         return self.session.post(
@@ -261,6 +289,9 @@ class TelegramClient:
             return None
 
     def _build_post_message(self, chat_id: str, article: Article, generated_post: GeneratedPost) -> str:
+        if self.settings.content_mode == "books":
+            return self._build_book_post_message(chat_id, article, generated_post)
+
         title = html.escape(generated_post.title)
         summary = html.escape(generated_post.summary)
         why_it_matters = "\n".join(
@@ -283,7 +314,50 @@ class TelegramClient:
             f"{hashtags}"
         )
 
+    def _build_book_post_message(self, chat_id: str, article: Article, generated_post: GeneratedPost) -> str:
+        title = html.escape(generated_post.title)
+        quote = html.escape(generated_post.quote or generated_post.summary)
+        summary = html.escape(generated_post.summary)
+        takeaways = "\n".join(
+            f"- {html.escape(point)}" for point in (generated_post.why_it_matters[:2] or ["Keep growing one step at a time."])
+        )
+        hashtags = self._build_hashtags(article, generated_post)
+        discovery_footer = self._build_discovery_footer(chat_id)
+        source = html.escape(article.source)
+        return (
+            f"{self._build_intro(chat_id)}\n\n"
+            f"<b>{title}</b>\n\n"
+            f"<b>Quote of the Day</b>\n"
+            f"<i>\"{quote}\"</i>\n\n"
+            f"{summary}\n\n"
+            f"<b>Takeaways:</b>\n{takeaways}\n\n"
+            f"<b>Inspired by:</b> {source}\n\n"
+            f"{discovery_footer}\n\n"
+            f"{hashtags}"
+        )
+
     def _build_group_starter_message(self, generated_post: GeneratedPost) -> str:
+        if self.settings.content_mode == "books":
+            quote_line = generated_post.quote or generated_post.summary
+            takeaway = (
+                html.escape(generated_post.why_it_matters[0])
+                if generated_post.why_it_matters
+                else "Keep showing up for your goals."
+            )
+            return self._append_group_footer(
+                (
+                "<b>Reader Discussion</b>\n\n"
+                f"<b>Theme:</b> {html.escape(generated_post.title)}\n"
+                f"<b>Quote:</b> {html.escape(quote_line)}\n"
+                f"<b>Takeaway:</b> {takeaway}\n\n"
+                f"{html.escape(self.settings.group_discussion_call_to_action)}"
+                ),
+                generated_post.title,
+                generated_post.quote,
+                generated_post.summary,
+                *generated_post.why_it_matters,
+            )
+
         why_it_matters = html.escape(generated_post.why_it_matters[0]) if generated_post.why_it_matters else "Important for exam preparation."
         return self._append_group_footer(
             (
@@ -381,40 +455,64 @@ class TelegramClient:
         return value[: limit - 3].rstrip() + "..."
 
     def _build_hashtags(self, article: Article, generated_post: GeneratedPost) -> str:
-        return self._build_hashtags_from_text(
+        auto_tags = self._build_hashtags_from_text(
             " ".join(
                 [
                     article.title,
                     article.description,
                     generated_post.title,
                     generated_post.summary,
+                    generated_post.quote,
                     " ".join(generated_post.why_it_matters),
                 ]
             )
-        )
+        ).split()
+        tags: list[str] = []
+        seen: set[str] = set()
+        for tag in [*generated_post.hashtags, *auto_tags]:
+            normalized = tag.strip()
+            if not normalized or normalized.lower() in seen:
+                continue
+            seen.add(normalized.lower())
+            tags.append(normalized)
+        return " ".join(tags[:10])
 
     def _build_hashtags_from_text(self, text: str) -> str:
         text = text.lower()
-        tags = ["#CurrentAffairs", "#UPSC", "#SSC", "#GK", "#GovtExams"]
-
-        keyword_tags = [
-            ("economy", "#Economy"),
-            ("budget", "#Economy"),
-            ("rbi", "#Economy"),
-            ("government", "#Polity"),
-            ("parliament", "#Polity"),
-            ("bill", "#Polity"),
-            ("scheme", "#Schemes"),
-            ("science", "#ScienceTech"),
-            ("technology", "#ScienceTech"),
-            ("space", "#ScienceTech"),
-            ("summit", "#InternationalRelations"),
-            ("diplomacy", "#InternationalRelations"),
-            ("iran", "#InternationalRelations"),
-            ("sports", "#Sports"),
-            ("environment", "#Environment"),
-            ("climate", "#Environment"),
-        ]
+        if self.settings.content_mode == "books":
+            tags = ["#Motivation", "#BookQuotes", "#SelfGrowth", "#Mindset", "#DailyInspiration"]
+            keyword_tags = [
+                ("discipline", "#Discipline"),
+                ("habit", "#SuccessHabits"),
+                ("focus", "#Focus"),
+                ("success", "#SuccessMindset"),
+                ("growth", "#GrowthMindset"),
+                ("confidence", "#Confidence"),
+                ("leadership", "#Leadership"),
+                ("healing", "#HealingJourney"),
+                ("purpose", "#Purpose"),
+                ("consistency", "#Consistency"),
+            ]
+        else:
+            tags = ["#CurrentAffairs", "#UPSC", "#SSC", "#GK", "#GovtExams"]
+            keyword_tags = [
+                ("economy", "#Economy"),
+                ("budget", "#Economy"),
+                ("rbi", "#Economy"),
+                ("government", "#Polity"),
+                ("parliament", "#Polity"),
+                ("bill", "#Polity"),
+                ("scheme", "#Schemes"),
+                ("science", "#ScienceTech"),
+                ("technology", "#ScienceTech"),
+                ("space", "#ScienceTech"),
+                ("summit", "#InternationalRelations"),
+                ("diplomacy", "#InternationalRelations"),
+                ("iran", "#InternationalRelations"),
+                ("sports", "#Sports"),
+                ("environment", "#Environment"),
+                ("climate", "#Environment"),
+            ]
 
         for keyword, tag in keyword_tags:
             if keyword in text and tag not in tags:
@@ -436,6 +534,10 @@ class TelegramClient:
         return "\n\n".join(section for section in sections if section)
 
     def _build_intro(self, chat_id: str) -> str:
+        if self.settings.content_mode == "books":
+            if chat_id == self.settings.telegram_group_id:
+                return "<b>Reader Discussion</b>"
+            return "<b>Daily Book Motivation</b>"
         if chat_id == self.settings.telegram_channel_id:
             return "<b>Current Affairs Update</b>"
         if chat_id == self.settings.telegram_group_id:

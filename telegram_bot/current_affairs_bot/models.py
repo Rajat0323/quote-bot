@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -25,6 +25,8 @@ class GeneratedPost:
     summary: str
     why_it_matters: list[str]
     mcqs: list[MCQ]
+    quote: str = ""
+    hashtags: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

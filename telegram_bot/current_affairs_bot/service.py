@@ -1,8 +1,11 @@
 import logging
 import time
+from typing import Protocol
 
 from current_affairs_bot.config import Settings
+from current_affairs_bot.document_client import DocumentClient
 from current_affairs_bot.llm_client import LLMClient
+from current_affairs_bot.models import Article
 from current_affairs_bot.news_client import NewsClient
 from current_affairs_bot.state_store import PendingRevealStore, StateStore
 from current_affairs_bot.telegram_client import TelegramClient
@@ -11,18 +14,23 @@ from current_affairs_bot.telegram_client import TelegramClient
 LOGGER = logging.getLogger(__name__)
 
 
+class ContentClient(Protocol):
+    def fetch_latest(self, posted_urls: set[str] | None = None) -> list[Article]:
+        ...
+
+
 class CurrentAffairsService:
     def __init__(
         self,
         settings: Settings,
-        news_client: NewsClient,
+        content_client: ContentClient,
         llm_client: LLMClient,
         telegram_client: TelegramClient,
         state_store: StateStore,
         pending_reveal_store: PendingRevealStore,
     ) -> None:
         self.settings = settings
-        self.news_client = news_client
+        self.content_client = content_client
         self.llm_client = llm_client
         self.telegram_client = telegram_client
         self.state_store = state_store
@@ -31,7 +39,7 @@ class CurrentAffairsService:
     def run_cycle(self, dry_run: bool = False) -> int:
         reveal_count = self._process_due_group_reveals(dry_run=dry_run)
         posted_urls = self.state_store.posted_urls()
-        articles = self.news_client.fetch_latest(posted_urls=posted_urls)
+        articles = self.content_client.fetch_latest(posted_urls=posted_urls)
         fresh_articles = [article for article in articles if article.url not in posted_urls]
         selected_articles = list(reversed(fresh_articles[: self.settings.max_articles_per_cycle]))
         if not selected_articles:
@@ -105,9 +113,14 @@ class CurrentAffairsService:
 
 
 def build_service(settings: Settings) -> CurrentAffairsService:
+    content_client: ContentClient
+    if settings.content_mode == "books":
+        content_client = DocumentClient(settings)
+    else:
+        content_client = NewsClient(settings)
     return CurrentAffairsService(
         settings=settings,
-        news_client=NewsClient(settings),
+        content_client=content_client,
         llm_client=LLMClient(settings),
         telegram_client=TelegramClient(settings),
         state_store=StateStore(settings.state_file),

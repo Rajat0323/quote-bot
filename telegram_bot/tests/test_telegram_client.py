@@ -35,6 +35,7 @@ class FakeSession:
 
 def build_settings(**overrides: object) -> SimpleNamespace:
     defaults: dict[str, object] = {
+        "content_mode": "news",
         "telegram_bot_token": "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
         "request_timeout_seconds": 10,
         "telegram_channel_id": "",
@@ -47,6 +48,7 @@ def build_settings(**overrides: object) -> SimpleNamespace:
         "telegram_group_ref": "",
         "telegram_brand_name": "Current Affairs Hub",
         "telegram_call_to_action": "Follow for daily updates.",
+        "telegram_channel_description": "Daily updates and searchable topic posts.",
         "telegram_discovery_keywords": (),
         "group_answer_delay_minutes": 30,
     }
@@ -205,6 +207,7 @@ class TelegramClientMigrationTests(unittest.TestCase):
         )
         client.session = FakeSession(
             [
+                FakeResponse(200, {"ok": True, "result": True}),
                 FakeResponse(200, {"ok": True, "result": {"message_id": 1}}),
                 FakeResponse(200, {"ok": True, "result": {"message_id": 2}}),
             ]
@@ -212,12 +215,14 @@ class TelegramClientMigrationTests(unittest.TestCase):
 
         client.broadcast(build_article(), build_generated_post())
 
-        self.assertEqual(len(client.session.calls), 2)
-        self.assertTrue(all("@currentaffairschannel" in str(call["data"]["text"]) for call in client.session.calls))
+        send_message_calls = [call for call in client.session.calls if str(call["url"]).endswith("/sendMessage")]
+        self.assertEqual(len(client.session.calls), 3)
+        self.assertEqual(len(send_message_calls), 2)
+        self.assertTrue(all("@currentaffairschannel" in str(call["data"]["text"]) for call in send_message_calls))
         self.assertTrue(
-            all("subscribe for more - @currentaffairschannel" in str(call["data"]["text"]) for call in client.session.calls)
+            all("subscribe for more - @currentaffairschannel" in str(call["data"]["text"]) for call in send_message_calls)
         )
-        self.assertTrue(all("#CurrentAffairs" in str(call["data"]["text"]) for call in client.session.calls))
+        self.assertTrue(all("#CurrentAffairs" in str(call["data"]["text"]) for call in send_message_calls))
 
     def test_group_posts_retry_after_rate_limit(self) -> None:
         client = TelegramClient(build_settings())
@@ -238,6 +243,41 @@ class TelegramClientMigrationTests(unittest.TestCase):
             [call["data"]["chat_id"] for call in client.session.calls],
             [OLD_GROUP_ID, OLD_GROUP_ID, OLD_GROUP_ID],
         )
+
+    def test_books_channel_post_uses_quote_format_and_book_tags(self) -> None:
+        client = TelegramClient(
+            build_settings(
+                content_mode="books",
+                telegram_channel_id="@bookquotesdaily",
+                telegram_group_id="",
+                telegram_channel_ref="@bookquotesdaily",
+                telegram_discovery_keywords=("daily motivation",),
+            )
+        )
+        article = Article(
+            title="Atomic Habits | Insight 1",
+            description="A short book excerpt about consistency.",
+            url="book://atomic-habits.txt#chunk-1",
+            source="Atomic Habits",
+            published_at="2026-05-04T10:00:00Z",
+            content="Big changes grow from small, repeated actions.",
+        )
+        generated_post = GeneratedPost(
+            title="Consistency Wins Quietly",
+            summary="Small steps look ordinary today, but they become the proof of your future self.",
+            why_it_matters=["Daily effort compounds into visible growth."],
+            mcqs=[],
+            quote="Stay loyal to the work before the results arrive.",
+            hashtags=["#ReadingMotivation"],
+        )
+
+        message = client._build_post_message("@bookquotesdaily", article, generated_post)
+
+        self.assertIn("Quote of the Day", message)
+        self.assertIn("Inspired by:</b> Atomic Habits", message)
+        self.assertIn("#BookQuotes", message)
+        self.assertIn("#ReadingMotivation", message)
+        self.assertIn("@bookquotesdaily", message)
 
 
 if __name__ == "__main__":

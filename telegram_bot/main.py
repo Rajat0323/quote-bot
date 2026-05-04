@@ -7,7 +7,7 @@ from current_affairs_bot.service import build_service
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Telegram current affairs bot for UPSC and SSC aspirants."
+        description="Telegram bot for current-affairs posts or book-based motivational quote posts."
     )
     parser.add_argument(
         "--once",

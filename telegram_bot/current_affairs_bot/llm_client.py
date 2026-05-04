@@ -10,11 +10,19 @@ from current_affairs_bot.models import Article, GeneratedPost, MCQ
 
 LOGGER = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """
+NEWS_SYSTEM_PROMPT = """
 You create concise current affairs study material for UPSC and SSC aspirants.
 Return only valid JSON.
 Keep the tone clear, factual, and easy to revise quickly.
 Use only the facts available in the provided article details.
+""".strip()
+
+BOOKS_SYSTEM_PROMPT = """
+You turn book excerpts into motivational Telegram-ready content.
+Return only valid JSON.
+Keep the tone warm, uplifting, and simple.
+Use only the ideas available in the provided excerpt.
+Do not copy long lines from the source text verbatim.
 """.strip()
 
 
@@ -28,7 +36,7 @@ class LLMClient:
             "model": self.settings.openai_model,
             "temperature": 0.3,
             "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": self._system_prompt()},
                 {
                     "role": "user",
                     "content": self._build_user_prompt(article),
@@ -54,6 +62,31 @@ class LLMClient:
         return generated
 
     def _build_user_prompt(self, article: Article) -> str:
+        if self.settings.content_mode == "books":
+            return f"""
+Create a motivational Telegram post from this book excerpt.
+
+Return JSON with exactly these keys:
+{{
+  "title": "short emotional theme title",
+  "quote": "1-2 line original motivational quote inspired by the excerpt",
+  "summary": "80-140 word attractive Telegram caption in simple English",
+  "why_it_matters": ["short takeaway 1", "short takeaway 2"],
+  "hashtags": ["#TagOne", "#TagTwo", "#TagThree"]
+}}
+
+Rules:
+- quote must be original wording inspired by the excerpt, not a direct copyrighted line
+- summary should feel polished, shareable, and human
+- why_it_matters should contain 2 short self-growth takeaways
+- hashtags should contain 5 to 8 concise tags without spaces
+- avoid cliches, spammy language, and fake claims
+
+Book source: {article.source}
+Excerpt title: {article.title}
+Excerpt: {article.content[:4000]}
+""".strip()
+
         return f"""
 Create a UPSC/SSC current affairs digest from this article.
 
@@ -89,6 +122,11 @@ Content: {article.content[:3000]}
 URL: {article.url}
 """.strip()
 
+    def _system_prompt(self) -> str:
+        if self.settings.content_mode == "books":
+            return BOOKS_SYSTEM_PROMPT
+        return NEWS_SYSTEM_PROMPT
+
     def _message_to_text(self, message: str | list[dict]) -> str:
         if isinstance(message, str):
             return message.strip()
@@ -117,13 +155,19 @@ URL: {article.url}
     def _coerce_generated_post(self, article: Article, payload: dict) -> GeneratedPost:
         title = str(payload.get("title") or article.title).strip()
         summary = str(payload.get("summary") or article.description or article.title).strip()
+        quote = str(payload.get("quote") or "").strip()
 
         why_raw = payload.get("why_it_matters") or []
         if isinstance(why_raw, str):
             why_it_matters = [why_raw.strip()]
         else:
             why_it_matters = [str(item).strip() for item in why_raw if str(item).strip()]
-        why_it_matters = why_it_matters[:2] or ["Relevant for current affairs revision."]
+        default_takeaway = (
+            "Relevant for current affairs revision."
+            if self.settings.content_mode == "news"
+            else "A reminder to keep growing with patience and purpose."
+        )
+        why_it_matters = why_it_matters[:2] or [default_takeaway]
 
         mcqs: list[MCQ] = []
         for item in payload.get("mcqs", []):
@@ -144,10 +188,33 @@ URL: {article.url}
                 )
             )
 
+        hashtags = self._coerce_hashtags(payload.get("hashtags"))
         return GeneratedPost(
             title=title or article.title,
             summary=summary,
             why_it_matters=why_it_matters,
             mcqs=mcqs[: self.settings.mcqs_per_article],
+            quote=quote,
+            hashtags=hashtags,
         )
+
+    def _coerce_hashtags(self, raw_hashtags: object) -> list[str]:
+        if isinstance(raw_hashtags, str):
+            items = re.findall(r"#?[A-Za-z0-9_]+", raw_hashtags)
+        elif isinstance(raw_hashtags, list):
+            items = [str(item).strip() for item in raw_hashtags if str(item).strip()]
+        else:
+            items = []
+
+        hashtags: list[str] = []
+        seen: set[str] = set()
+        for item in items:
+            normalized = "#" + "".join(ch for ch in item if ch.isalnum() or ch == "_").lstrip("#")
+            if len(normalized) <= 1:
+                continue
+            if normalized.lower() in seen:
+                continue
+            seen.add(normalized.lower())
+            hashtags.append(normalized)
+        return hashtags[:8]
 

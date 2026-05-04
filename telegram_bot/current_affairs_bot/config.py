@@ -55,6 +55,14 @@ def _csv_env(name: str, default: str = "") -> tuple[str, ...]:
     return tuple(item.strip() for item in raw.split(",") if item.strip())
 
 
+def _choice_env(name: str, default: str, allowed: tuple[str, ...]) -> str:
+    value = _optional_env(name, default).lower()
+    if value not in allowed:
+        allowed_text = ", ".join(allowed)
+        raise ValueError(f"Environment variable {name} must be one of: {allowed_text}.")
+    return value
+
+
 def _validate_telegram_bot_token(value: str) -> str:
     token = _sanitize_secret_like_value(value)
     if not re.match(r"^\d{6,}:[A-Za-z0-9_-]{20,}$", token):
@@ -105,6 +113,7 @@ def _validate_public_ref(value: str, env_name: str) -> str:
 
 @dataclass(frozen=True)
 class Settings:
+    content_mode: str
     telegram_bot_token: str
     telegram_channel_id: str
     telegram_group_id: str
@@ -123,6 +132,10 @@ class Settings:
     request_timeout_seconds: int
     state_file: Path
     group_reveal_state_file: Path
+    books_source_dir: Path
+    books_chunk_size: int
+    books_chunk_overlap: int
+    books_max_chunks_per_document: int
     openai_api_key: str
     openai_base_url: str
     openai_model: str
@@ -133,15 +146,18 @@ class Settings:
     telegram_channel_ref: str
     telegram_group_ref: str
     telegram_call_to_action: str
+    telegram_channel_description: str
     telegram_discovery_keywords: tuple[str, ...]
     group_answer_delay_minutes: int
     group_discussion_call_to_action: str
 
     def __post_init__(self) -> None:
-        if not self.news_api_key and not self.newsdata_api_key:
+        if self.content_mode == "news" and not self.news_api_key and not self.newsdata_api_key:
             raise ValueError(
                 "Set at least one news provider key: NEWS_API_KEY or NEWSDATA_API_KEY."
             )
+        if self.books_chunk_size <= self.books_chunk_overlap:
+            raise ValueError("BOOKS_CHUNK_SIZE must be greater than BOOKS_CHUNK_OVERLAP.")
         if self.telegram_require_group and not self.telegram_group_id:
             raise ValueError(
                 "TELEGRAM_GROUP_ID is required because TELEGRAM_REQUIRE_GROUP is enabled. "
@@ -166,11 +182,29 @@ class Settings:
     @classmethod
     def from_env(cls) -> "Settings":
         load_dotenv(BASE_DIR / ".env")
+        content_mode = _choice_env("CONTENT_MODE", "news", ("news", "books"))
         state_relative_path = Path(_optional_env("STATE_FILE", "data/posted_articles.json"))
         reveal_state_relative_path = Path(
             _optional_env("GROUP_REVEAL_STATE_FILE", "data/pending_group_reveals.json")
         )
+        default_brand_name = "Current Affairs Hub" if content_mode == "news" else "Book Quote Daily"
+        default_call_to_action = (
+            "Follow for daily UPSC/SSC current affairs, exam-focused summaries, and quick MCQ practice."
+            if content_mode == "news"
+            else "Join for daily motivational quotes from books, mindset lessons, and shareable self-growth posts."
+        )
+        default_discovery_keywords = (
+            "UPSC current affairs, SSC current affairs, daily current affairs, current affairs quiz, government exam preparation, GK updates"
+            if content_mode == "news"
+            else "motivational quotes, book quotes, self growth, mindset motivation, daily inspiration, success habits"
+        )
+        default_channel_description = (
+            "Daily UPSC and SSC current affairs updates, exam-ready summaries, MCQs, and revision-focused insights."
+            if content_mode == "news"
+            else "Daily motivational quotes from books, mindset lessons, self growth insights, and shareable inspiration posts."
+        )
         return cls(
+            content_mode=content_mode,
             telegram_bot_token=_validate_telegram_bot_token(
                 _first_present(("TELEGRAM_BOT_TOKEN", "BOT_TOKEN")) or _require_env("TELEGRAM_BOT_TOKEN")
             ),
@@ -206,13 +240,17 @@ class Settings:
             request_timeout_seconds=_int_env("REQUEST_TIMEOUT_SECONDS", 30),
             state_file=(BASE_DIR / state_relative_path).resolve(),
             group_reveal_state_file=(BASE_DIR / reveal_state_relative_path).resolve(),
+            books_source_dir=(BASE_DIR / Path(_optional_env("BOOKS_SOURCE_DIR", "data/books"))).resolve(),
+            books_chunk_size=_int_env("BOOKS_CHUNK_SIZE", 2200),
+            books_chunk_overlap=_int_env("BOOKS_CHUNK_OVERLAP", 250),
+            books_max_chunks_per_document=_int_env("BOOKS_MAX_CHUNKS_PER_DOCUMENT", 20),
             openai_api_key=_first_present(("OPENAI_API_KEY", "LLM_API_KEY")) or _require_env("OPENAI_API_KEY"),
             openai_base_url=_first_present(("OPENAI_BASE_URL", "LLM_BASE_URL"), "https://api.openai.com/v1"),
             openai_model=_first_present(("OPENAI_MODEL", "LLM_MODEL"), "gpt-4.1-mini"),
             telegram_send_mcq_polls=_bool_env("TELEGRAM_SEND_MCQ_POLLS", True),
             mcqs_per_article=_int_env("MCQS_PER_ARTICLE", 3),
-            telegram_require_group=_bool_env("TELEGRAM_REQUIRE_GROUP", True),
-            telegram_brand_name=_optional_env("TELEGRAM_BRAND_NAME", "Current Affairs Hub"),
+            telegram_require_group=_bool_env("TELEGRAM_REQUIRE_GROUP", False),
+            telegram_brand_name=_optional_env("TELEGRAM_BRAND_NAME", default_brand_name),
             telegram_channel_ref=_validate_public_ref(
                 _optional_env("TELEGRAM_CHANNEL_REF"),
                 "TELEGRAM_CHANNEL_REF",
@@ -221,13 +259,14 @@ class Settings:
                 _optional_env("TELEGRAM_GROUP_REF"),
                 "TELEGRAM_GROUP_REF",
             ),
-            telegram_call_to_action=_optional_env(
-                "TELEGRAM_CALL_TO_ACTION",
-                "Follow for daily UPSC/SSC current affairs, exam-focused summaries, and quick MCQ practice.",
+            telegram_call_to_action=_optional_env("TELEGRAM_CALL_TO_ACTION", default_call_to_action),
+            telegram_channel_description=_optional_env(
+                "TELEGRAM_CHANNEL_DESCRIPTION",
+                default_channel_description,
             ),
             telegram_discovery_keywords=_csv_env(
                 "TELEGRAM_DISCOVERY_KEYWORDS",
-                "UPSC current affairs, SSC current affairs, daily current affairs, current affairs quiz, government exam preparation, GK updates",
+                default_discovery_keywords,
             ),
             group_answer_delay_minutes=_int_env("GROUP_ANSWER_DELAY_MINUTES", 30),
             group_discussion_call_to_action=_optional_env(
