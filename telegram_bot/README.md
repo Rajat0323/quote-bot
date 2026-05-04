@@ -107,6 +107,8 @@ The workflow file is:
 .github/workflows/current-affairs-bot.yml
 ```
 
+The workflow now loads non-secret runtime settings from [telegram_bot/github-actions.env](/C:/Users/Rajat%20Gupta/Documents/New%20project%203/telegram_bot/github-actions.env). Keep only tokens and API keys in GitHub Secrets.
+
 It supports:
 
 - scheduled runs every 15 minutes
@@ -129,29 +131,13 @@ It supports:
 
 Set at least one of `NEWS_API_KEY` or `NEWSDATA_API_KEY` only when `CONTENT_MODE=news`.
 
-### Optional repository variables
+### Repository config file
 
-- `TELEGRAM_REQUIRE_GROUP`
-- `TELEGRAM_BRAND_NAME`
-- `TELEGRAM_CHANNEL_REF`
-- `TELEGRAM_GROUP_REF`
-- `TELEGRAM_CALL_TO_ACTION`
-- `TELEGRAM_DISCOVERY_KEYWORDS`
-- `GROUP_ANSWER_DELAY_MINUTES`
-- `GROUP_DISCUSSION_CALL_TO_ACTION`
-- `CURRENT_AFFAIRS_QUERY`
-- `NEWSDATA_INDIA_QUERY`
-- `NEWSDATA_WORLD_QUERY`
-- `NEWSDATA_INDIA_COUNTRY`
-- `NEWS_PAGE_SIZE`
-- `MAX_ARTICLES_PER_CYCLE`
-- `REQUEST_TIMEOUT_SECONDS`
-- `CONTENT_MODE`
-- `BOOKS_SOURCE_DIR`
-- `BOOKS_CHUNK_SIZE`
-- `BOOKS_CHUNK_OVERLAP`
-- `BOOKS_MAX_CHUNKS_PER_DOCUMENT`
-- `TELEGRAM_CHANNEL_DESCRIPTION`
+Store non-secret GitHub Actions settings in:
+
+```text
+telegram_bot/github-actions.env
+```
 
 ### Group behavior
 

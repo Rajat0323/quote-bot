@@ -22,39 +22,13 @@ jobs:
         working-directory: telegram_bot
 
     env:
-      CONTENT_MODE: ${{ vars.CONTENT_MODE || 'books' }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN || secrets.BOT_TOKEN }}
       TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID || secrets.CHANNEL_ID }}
       TELEGRAM_GROUP_ID: ${{ secrets.TELEGRAM_GROUP_ID || secrets.GROUP_ID }}
-      TELEGRAM_REQUIRE_GROUP: ${{ vars.TELEGRAM_REQUIRE_GROUP || 'false' }}
-      TELEGRAM_BRAND_NAME: ${{ vars.TELEGRAM_BRAND_NAME || 'Quote Bot Daily' }}
-      TELEGRAM_CHANNEL_REF: ${{ vars.TELEGRAM_CHANNEL_REF || '' }}
-      TELEGRAM_GROUP_REF: ${{ vars.TELEGRAM_GROUP_REF || '' }}
-      TELEGRAM_CALL_TO_ACTION: ${{ vars.TELEGRAM_CALL_TO_ACTION || 'Join for daily motivational quotes from books, mindset lessons, and shareable self-growth posts.' }}
-      TELEGRAM_CHANNEL_DESCRIPTION: ${{ vars.TELEGRAM_CHANNEL_DESCRIPTION || 'Daily motivational quotes from books, mindset lessons, self growth insights, and shareable inspiration posts.' }}
-      TELEGRAM_DISCOVERY_KEYWORDS: ${{ vars.TELEGRAM_DISCOVERY_KEYWORDS || 'motivational quotes, book quotes, self growth, mindset motivation, daily inspiration, success habits' }}
-      GROUP_ANSWER_DELAY_MINUTES: ${{ vars.GROUP_ANSWER_DELAY_MINUTES || '30' }}
-      GROUP_DISCUSSION_CALL_TO_ACTION: ${{ vars.GROUP_DISCUSSION_CALL_TO_ACTION || 'Reply with your reason or one keyword you would revise from this topic.' }}
       NEWS_API_KEY: ${{ secrets.NEWS_API_KEY || secrets.NEWSAPI_KEY }}
       NEWSDATA_API_KEY: ${{ secrets.NEWSDATA_API_KEY }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY || '' }}
       OPENAI_API_KEY: ${{ secrets.GROQ_API_KEY || secrets.OPENAI_API_KEY || secrets.LLM_API_KEY }}
-      OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL || secrets.LLM_BASE_URL || secrets.GROQ_BASE_URL || vars.OPENAI_BASE_URL || vars.LLM_BASE_URL || vars.GROQ_BASE_URL || 'https://api.groq.com/openai/v1' }}
-      OPENAI_MODEL: ${{ secrets.OPENAI_MODEL || secrets.LLM_MODEL || secrets.GROQ_MODEL || vars.OPENAI_MODEL || vars.LLM_MODEL || vars.GROQ_MODEL || 'your-groq-model-name' }}
-      CURRENT_AFFAIRS_QUERY: ${{ vars.CURRENT_AFFAIRS_QUERY || 'India OR government OR parliament OR economy OR summit OR diplomacy OR science OR sports' }}
-      NEWSDATA_INDIA_QUERY: ${{ vars.NEWSDATA_INDIA_QUERY || 'India OR government OR parliament OR economy OR summit OR diplomacy OR science OR sports' }}
-      NEWSDATA_WORLD_QUERY: ${{ vars.NEWSDATA_WORLD_QUERY || 'government OR parliament OR economy OR summit OR diplomacy OR science OR sports' }}
-      NEWSDATA_INDIA_COUNTRY: ${{ vars.NEWSDATA_INDIA_COUNTRY || 'in' }}
-      NEWSDATA_API_URL: ${{ vars.NEWSDATA_API_URL || 'https://newsdata.io/api/1/latest' }}
-      NEWS_PAGE_SIZE: ${{ vars.NEWS_PAGE_SIZE || '10' }}
-      MAX_ARTICLES_PER_CYCLE: ${{ vars.MAX_ARTICLES_PER_CYCLE || '2' }}
-      REQUEST_TIMEOUT_SECONDS: ${{ vars.REQUEST_TIMEOUT_SECONDS || '30' }}
-      TELEGRAM_SEND_MCQ_POLLS: ${{ vars.TELEGRAM_SEND_MCQ_POLLS || 'false' }}
-      MCQS_PER_ARTICLE: ${{ vars.MCQS_PER_ARTICLE || '0' }}
-      BOOKS_SOURCE_DIR: ${{ vars.BOOKS_SOURCE_DIR || 'data/books' }}
-      BOOKS_CHUNK_SIZE: ${{ vars.BOOKS_CHUNK_SIZE || '2200' }}
-      BOOKS_CHUNK_OVERLAP: ${{ vars.BOOKS_CHUNK_OVERLAP || '250' }}
-      BOOKS_MAX_CHUNKS_PER_DOCUMENT: ${{ vars.BOOKS_MAX_CHUNKS_PER_DOCUMENT || '20' }}
       STATE_FILE: data/posted_articles.json
       GROUP_REVEAL_STATE_FILE: data/pending_group_reveals.json
 
@@ -62,18 +36,27 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Load repository config
+        shell: bash
+        run: |
+          if [ ! -f "github-actions.env" ]; then
+            echo "Missing telegram_bot/github-actions.env"
+            exit 1
+          fi
+          grep -vE '^[[:space:]]*(#|$)' github-actions.env >> "$GITHUB_ENV"
+
       - name: Validate required configuration
         shell: bash
         run: |
           missing=0
           for name in TELEGRAM_BOT_TOKEN TELEGRAM_CHANNEL_ID OPENAI_API_KEY; do
             if [ -z "${!name}" ]; then
-              echo "Missing required secret or variable: $name"
+              echo "Missing required secret: $name"
               missing=1
             fi
           done
-          if [ "${OPENAI_MODEL}" = "your-groq-model-name" ]; then
-            echo "Set OPENAI_MODEL, LLM_MODEL, or GROQ_MODEL to your Groq model name."
+          if [ "${OPENAI_MODEL}" = "your_groq_model_name" ]; then
+            echo "Set OPENAI_MODEL in telegram_bot/github-actions.env to your Groq model name."
             missing=1
           fi
           echo "Running in CONTENT_MODE=${CONTENT_MODE}"
