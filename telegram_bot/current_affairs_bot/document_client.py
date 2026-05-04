@@ -14,7 +14,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 class DocumentClient:
-    SUPPORTED_EXTENSIONS = {".txt", ".md", ".docx", ".json"}
+    SUPPORTED_EXTENSIONS = {".txt", ".md", ".docx", ".json", ".pdf"}
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -29,6 +29,9 @@ class DocumentClient:
         documents_loaded = 0
         for path in sorted(source_dir.rglob("*")):
             if not path.is_file() or path.suffix.lower() not in self.SUPPORTED_EXTENSIONS:
+                continue
+            if self._should_skip_document(path):
+                LOGGER.info("Skipped helper document: %s", path)
                 continue
 
             text = self._read_document(path)
@@ -60,6 +63,11 @@ class DocumentClient:
             if fresh_count >= self.settings.max_articles_per_cycle:
                 break
 
+        if documents_loaded == 0:
+            LOGGER.warning(
+                "No supported book source files found in %s. Add at least one .txt, .md, .docx, .json, or .pdf file to enable books-mode posting.",
+                source_dir,
+            )
         LOGGER.info(
             "Loaded %s excerpt(s) from %s document(s) in books mode with %s fresh candidate(s).",
             len(excerpts),
@@ -76,6 +84,8 @@ class DocumentClient:
             return self._normalize_text(self._read_json_document(path))
         if suffix == ".docx":
             return self._normalize_text(self._read_docx_document(path))
+        if suffix == ".pdf":
+            return self._normalize_text(self._read_pdf_document(path))
         return ""
 
     def _read_json_document(self, path: Path) -> str:
@@ -114,6 +124,23 @@ class DocumentClient:
         root = ElementTree.fromstring(xml_content)
         text_parts = [part.strip() for part in root.itertext() if part and part.strip()]
         return "\n".join(text_parts)
+
+    def _read_pdf_document(self, path: Path) -> str:
+        try:
+            from pypdf import PdfReader
+        except ImportError as exc:
+            raise RuntimeError(
+                "PDF support requires the 'pypdf' package. Install dependencies from requirements.txt."
+            ) from exc
+
+        reader = PdfReader(str(path), strict=False)
+        text_parts: list[str] = []
+        for page in reader.pages:
+            extracted = page.extract_text() or ""
+            cleaned = extracted.strip()
+            if cleaned:
+                text_parts.append(cleaned)
+        return "\n\n".join(text_parts)
 
     def _normalize_text(self, text: str) -> str:
         text = text.replace("\r\n", "\n").replace("\r", "\n")
@@ -178,3 +205,6 @@ class DocumentClient:
     def _file_modified_at(self, path: Path) -> str:
         modified_at = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
         return modified_at.isoformat()
+
+    def _should_skip_document(self, path: Path) -> bool:
+        return path.stem.strip().lower() == "readme"

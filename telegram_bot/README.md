@@ -6,7 +6,7 @@ A lightweight Python bot that can either fetch live news for exam-focused curren
 
 - Supports two content modes:
   - `news`: live current-affairs posts with summaries, relevance points, and MCQs
-  - `books`: motivational quote posts generated from local `.txt`, `.md`, `.docx`, or `.json` book files
+  - `books`: motivational quote posts generated from local `.txt`, `.md`, `.docx`, `.json`, or text-based `.pdf` book files
 - Pulls the latest articles using multiple providers with fallback when `CONTENT_MODE=news`:
   - `newsdata.io` India-focused query first
   - `newsdata.io` worldwide query second
@@ -79,11 +79,13 @@ Run continuously with polling:
 python main.py
 ```
 
+Use `POLL_INTERVAL_MINUTES=120` when you want the local continuous runner to match the GitHub Actions every-2-hours cadence.
+
 ## Books mode
 
 Use `CONTENT_MODE=books` to generate motivational Telegram posts from your own documents.
 
-- Put `.txt`, `.md`, `.docx`, or `.json` files inside [telegram_bot/data/books](/C:/Users/Rajat%20Gupta/Documents/New%20project%203/telegram_bot/data/books).
+- Put `.txt`, `.md`, `.docx`, `.json`, or text-based `.pdf` files inside [telegram_bot/data/books](/C:/Users/Rajat%20Gupta/Documents/New%20project%203/telegram_bot/data/books).
 - The bot reads each file, creates excerpt chunks, sends those excerpts to the LLM, and posts one fresh excerpt at a time.
 - `TELEGRAM_CHANNEL_DESCRIPTION` lets the bot update the channel description with SEO-friendly keywords when the bot has admin rights.
 - The default books-mode call to action, hashtags, and brand text can all be overridden through `.env`.
@@ -92,7 +94,6 @@ Recommended books-mode settings:
 
 ```env
 CONTENT_MODE=books
-TELEGRAM_BRAND_NAME=Quote Bot Daily
 TELEGRAM_CALL_TO_ACTION=Join for daily motivational quotes from books, mindset lessons, and shareable self-growth posts.
 TELEGRAM_CHANNEL_DESCRIPTION=Daily motivational quotes from books, mindset lessons, self growth insights, and shareable inspiration posts.
 TELEGRAM_DISCOVERY_KEYWORDS=motivational quotes, book quotes, self growth, mindset motivation, daily inspiration, success habits
@@ -111,7 +112,7 @@ The workflow now loads non-secret runtime settings from [telegram_bot/github-act
 
 It supports:
 
-- scheduled runs every 15 minutes
+- scheduled runs every 2 hours
 - manual runs from the Actions tab
 - committing `telegram_bot/data/posted_articles.json` back to the repo so posted-news state survives across runs
 
@@ -160,6 +161,6 @@ If `OPENAI_MODEL` is not set, the bot defaults to `gpt-4.1-mini`.
 - This project uses direct Telegram Bot API calls, so there is no heavy Telegram framework to maintain.
 - "Real time" here means scheduled polling. Adjust the GitHub Actions cron or local run mode as needed.
 - The default news query is broad. You should tune it further for polity, economy, science-tech, international relations, environment, and sports.
-- For books mode, convert PDFs to `.txt`, `.md`, `.docx`, or `.json` before adding them to `data/books`.
+- For books mode, image-only scanned PDFs may still need OCR before the bot can extract usable text.
 - Telegram discovery is influenced by public username, channel/group title, description, post consistency, and engagement. This bot can improve post wording and keyword coverage, but it cannot bypass anti-spam bans from mass-sharing links in unrelated groups.
 

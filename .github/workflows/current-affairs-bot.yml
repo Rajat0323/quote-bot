@@ -69,6 +69,9 @@ jobs:
             if [ ! -d "${BOOKS_SOURCE_DIR}" ]; then
               echo "BOOKS_SOURCE_DIR does not exist: ${BOOKS_SOURCE_DIR}"
               missing=1
+            elif ! find "${BOOKS_SOURCE_DIR}" -type f \( -name "*.txt" -o -name "*.md" -o -name "*.docx" -o -name "*.json" -o -name "*.pdf" \) ! -iname "README.*" | grep -q .; then
+              echo "No real book source files found in ${BOOKS_SOURCE_DIR}. Add at least one .txt, .md, .docx, .json, or .pdf file."
+              missing=1
             fi
           else
             echo "Unsupported CONTENT_MODE: ${CONTENT_MODE}"

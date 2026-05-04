@@ -1,5 +1,6 @@
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Protocol
 
 from current_affairs_bot.config import Settings
@@ -38,11 +39,18 @@ class CurrentAffairsService:
 
     def run_cycle(self, dry_run: bool = False) -> int:
         reveal_count = self._process_due_group_reveals(dry_run=dry_run)
-        posted_urls = self.state_store.posted_urls()
+        posted_state = self.state_store.posted_state()
+        posted_urls = set(posted_state.keys())
         articles = self.content_client.fetch_latest(posted_urls=posted_urls)
         fresh_articles = [article for article in articles if article.url not in posted_urls]
-        selected_articles = list(reversed(fresh_articles[: self.settings.max_articles_per_cycle]))
+        selected_articles = self._select_articles_for_cycle(articles, fresh_articles, posted_state)
         if not selected_articles:
+            if self.settings.content_mode == "books" and not articles:
+                LOGGER.warning(
+                    "Books mode did not find any usable excerpts, so nothing was posted. Add at least one .txt, .md, .docx, .json, or text-based .pdf file to %s.",
+                    self.settings.books_source_dir,
+                )
+                return 0
             LOGGER.info(
                 "No new articles found in this cycle. fetched=%s fresh=%s already_posted=%s pending_reveals_processed=%s",
                 len(articles),
@@ -100,6 +108,36 @@ class CurrentAffairsService:
         if not dry_run and sent_ids:
             self.pending_reveal_store.remove_ids(sent_ids)
         return processed
+
+    def _select_articles_for_cycle(
+        self,
+        articles: list[Article],
+        fresh_articles: list[Article],
+        posted_state: dict[str, dict[str, str]],
+    ) -> list[Article]:
+        if fresh_articles:
+            return list(reversed(fresh_articles[: self.settings.max_articles_per_cycle]))
+
+        if self.settings.content_mode != "books" or not articles:
+            return []
+
+        def posted_at_key(article: Article) -> datetime:
+            state = posted_state.get(article.url, {})
+            raw_value = str(state.get("posted_at") or "").strip()
+            if not raw_value:
+                return datetime.min.replace(tzinfo=timezone.utc)
+            try:
+                return datetime.fromisoformat(raw_value)
+            except ValueError:
+                return datetime.min.replace(tzinfo=timezone.utc)
+
+        recycled_articles = sorted(articles, key=posted_at_key)
+        selected = recycled_articles[: self.settings.max_articles_per_cycle]
+        LOGGER.info(
+            "No fresh book excerpts remained, so reusing %s previously posted excerpt(s) for continued scheduling.",
+            len(selected),
+        )
+        return selected
 
     def run_forever(self) -> None:
         LOGGER.info("Starting scheduler with %s-minute interval.", self.settings.poll_interval_minutes)
